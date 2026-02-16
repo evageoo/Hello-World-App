@@ -1,51 +1,57 @@
-import { supabase } from '@/lib/supabaseClient';
+import { createClient } from '@/utils/supabaseServer'
+import { redirect } from 'next/navigation'
 
 export default async function Home() {
-  // Fetching from the 'universities' table you found
-  const { data: rows, error } = await supabase.from('universities').select('*');
+  const supabase = await createClient()
 
-  if (error) {
-    return (
-      <main style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-        <h1>Database Error</h1>
-        <p style={{ color: 'red' }}>{error.message}</p>
-      </main>
-    );
+  // Check if user is logged in
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // Function to handle login
+  async function signIn() {
+    'use server'
+    const supabase = await createClient()
+    const { data } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        // This MUST match the /auth/callback route we create next
+        redirectTo: `http://localhost:3000/auth/callback`,
+      },
+    })
+
+    if (data.url) {
+      redirect(data.url)
+    }
   }
 
-  return (
-    <main style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto' }}>
-      <h1>University List</h1>
-      <p>Data fetched from Supabase project: <code>qihsgnfjqmkjmoowyfbn</code></p>
-      <hr />
+  // 1. If NOT logged in, show this:
+  if (!user) {
+    return (
+      <main style={{ padding: '2rem', textAlign: 'center' }}>
+        <h1>Assignment #3: Gated UI</h1>
+        <p>Please sign in to view the university list.</p>
+        <form action={signIn}>
+          <button style={{ padding: '10px 20px', cursor: 'pointer' }}>
+            Sign in with Google
+          </button>
+        </form>
+      </main>
+    )
+  }
 
-      <div style={{ marginTop: '2rem' }}>
-        {rows && rows.length > 0 ? (
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {rows.map((university: any) => (
-              <li
-                key={university.id || Math.random()}
-                style={{
-                  padding: '1.5rem',
-                  border: '1px solid #eaeaea',
-                  borderRadius: '10px',
-                  marginBottom: '1rem',
-                  backgroundColor: '#ffffff',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
-                }}
-              >
-                {/* Adjust 'name' if the column has a different name like 'university_name' */}
-                <strong>{university.name || 'University Entry'}</strong>
-                <pre style={{ fontSize: '0.8rem', marginTop: '10px', color: '#666' }}>
-                  {JSON.stringify(university, null, 2)}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>No universities found in the table.</p>
-        )}
-      </div>
+  // 2. If logged in, show the data from Assignment #2:
+  const { data: universities } = await supabase.from('universities').select('*')
+
+  return (
+    <main style={{ padding: '2rem' }}>
+      <h1>Welcome, {user.email}</h1>
+      <p>You have accessed the protected university list.</p>
+      <hr />
+      <ul>
+        {universities?.map((uni: any) => (
+          <li key={uni.id}>{uni.name}</li>
+        ))}
+      </ul>
     </main>
-  );
+  )
 }
