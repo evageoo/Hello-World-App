@@ -1,17 +1,17 @@
 import { createClient } from '@/utils/supabaseServer'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import UploadForm from '../components/UploadForm'
 
 export default async function Home() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
 
-  // 1. GATED UI: Login required
-  if (!user) {
+  if (!user || !session) {
     return (
-      <main style={{ padding: '2rem', textAlign: 'center', fontFamily: 'sans-serif' }}>
+      <main style={{ padding: '2rem', textAlign: 'center', color: '#000', backgroundColor: '#fff', minHeight: '100vh' }}>
         <h1>Caption Rater</h1>
-        <p>Please sign in to vote on captions.</p>
         <form action={async () => {
           'use server'
           const supabase = await createClient()
@@ -22,61 +22,44 @@ export default async function Home() {
           })
           if (data.url) redirect(data.url)
         }}>
-          <button style={{ padding: '10px 20px', cursor: 'pointer', borderRadius: '5px' }}>
-            Sign in with Google
-          </button>
+          <button style={{ padding: '12px 24px', cursor: 'pointer' }}>Sign in with Google</button>
         </form>
       </main>
     )
   }
 
-  // 2. FETCH DATA: Get the captions to display
-  const { data: captions } = await supabase.from('captions').select('*')
+  // Use the original simple order to prevent jumping
+  const { data: captions } = await supabase
+    .from('captions')
+    .select(`*, caption_votes(vote_value)`)
+    .order('id', { ascending: true }) // <--- Original stable sorting
 
-  // 3. SERVER ACTION: Insert the vote (Fixed for UUIDs)
   async function handleVote(formData: FormData) {
     'use server'
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      console.log("LOG: No user found.");
-      return;
-    }
+    if (!user) return
 
     const captionId = formData.get('captionId')
     const voteValue = formData.get('voteValue')
     const now = new Date().toISOString()
 
-    console.log("--- ATTEMPTING MUTATION ---");
-    console.log("Caption ID (UUID):", captionId);
-
-    const { error } = await supabase
-      .from('caption_votes')
-      .insert({
-        // Removed Number() because your caption_id is a UUID string
-        caption_id: captionId,
-        profile_id: user.id,
-        vote_value: parseInt(voteValue as string),
-        created_datetime_utc: now,
-        modified_datetime_utc: now
-      })
-
-    if (error) {
-      console.error('CRITICAL DATABASE ERROR:', error.message);
-      console.error('Full Error Object:', error);
-    } else {
-      console.log("SUCCESS: Row added to caption_votes");
-      revalidatePath('/')
-    }
+    await supabase.from('caption_votes').insert({
+      caption_id: captionId,
+      profile_id: user.id,
+      vote_value: parseInt(voteValue as string),
+      created_datetime_utc: now,
+      modified_datetime_utc: now
+    })
+    revalidatePath('/')
   }
 
   return (
-    <main style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <main style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto', color: '#000', backgroundColor: '#fff' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
-          <h2 style={{ margin: 0 }}>User: {user.email}</h2>
-          <p style={{ fontSize: '0.8rem', color: '#666' }}>Assignment #4: Mutating Data</p>
+          <h3 style={{ margin: 0 }}>{user.email}</h3>
+          <p style={{ margin: 0, color: '#3182ce', fontSize: '0.85rem' }}>Week 5 Finalized</p>
         </div>
         <form action={async () => {
           'use server';
@@ -88,49 +71,34 @@ export default async function Home() {
         </form>
       </header>
 
-      <hr style={{ margin: '1.5rem 0' }} />
+      <UploadForm sessionToken={session.access_token} />
 
-      <h3>Captions</h3>
+      <hr style={{ margin: '2rem 0', borderColor: '#eee' }} />
+      <h2>Caption Feed</h2>
 
-      {captions && captions.length > 0 ? (
-        captions.map((caption: any) => (
-          <div key={caption.id} style={{
-            padding: '1.5rem',
-            border: '1px solid #ddd',
-            borderRadius: '12px',
-            marginBottom: '1rem',
-            backgroundColor: '#f9f9f9'
-          }}>
-            <p style={{ fontSize: '1.1rem', fontWeight: '500', marginTop: 0 }}>{caption.text}</p>
-
-            <div style={{ display: 'flex', gap: '15px' }}>
-              <form action={handleVote}>
-                <input type="hidden" name="captionId" value={caption.id} />
-                <input type="hidden" name="voteValue" value="1" />
-                <button type="submit" style={{
-                  padding: '8px 16px', cursor: 'pointer', borderRadius: '6px',
-                  border: '1px solid #4CAF50', backgroundColor: '#e8f5e9', fontWeight: 'bold'
-                }}>
-                  👍 Upvote
-                </button>
-              </form>
-
-              <form action={handleVote}>
-                <input type="hidden" name="captionId" value={caption.id} />
-                <input type="hidden" name="voteValue" value="-1" />
-                <button type="submit" style={{
-                  padding: '8px 16px', cursor: 'pointer', borderRadius: '6px',
-                  border: '1px solid #f44336', backgroundColor: '#ffebee', fontWeight: 'bold'
-                }}>
-                  👎 Downvote
-                </button>
-              </form>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        {captions?.map((caption: any) => {
+          const score = caption.caption_votes?.reduce((acc: number, v: any) => acc + v.vote_value, 0) || 0;
+          return (
+            <div key={caption.id} style={{ padding: '1.2rem', border: '1px solid #ddd', borderRadius: '10px' }}>
+              <p style={{ margin: '0 0 10px 0', fontWeight: 'bold' }}>{caption.content}</p>
+              <p style={{ fontSize: '0.9rem', color: '#666' }}>Score: {score}</p>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <form action={handleVote}>
+                  <input type="hidden" name="captionId" value={caption.id} />
+                  <input type="hidden" name="voteValue" value="1" />
+                  <button type="submit" style={{ cursor: 'pointer' }}>👍 Upvote</button>
+                </form>
+                <form action={handleVote}>
+                  <input type="hidden" name="captionId" value={caption.id} />
+                  <input type="hidden" name="voteValue" value="-1" />
+                  <button type="submit" style={{ cursor: 'pointer' }}>👎 Downvote</button>
+                </form>
+              </div>
             </div>
-          </div>
-        ))
-      ) : (
-        <p>No captions found in the database.</p>
-      )}
+          )
+        })}
+      </div>
     </main>
   )
 }
