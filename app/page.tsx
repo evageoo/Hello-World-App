@@ -10,8 +10,9 @@ export default async function Home() {
   if (!user || authError) {
     return (
       <main style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#f1f5f9' }}>
-        <div style={{ backgroundColor: '#fff', padding: '40px', borderRadius: '16px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', textAlign: 'center', border: '1px solid #e2e8f0' }}>
-          <h1 style={{ color: '#1e293b', marginBottom: '24px', fontSize: '1.8rem' }}>Caption Rater</h1>
+        <div style={{ backgroundColor: '#fff', padding: '48px', borderRadius: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', textAlign: 'center', border: '1px solid #e2e8f0', maxWidth: '400px' }}>
+          <h1 style={{ color: '#0f172a', marginBottom: '12px', fontSize: '2.2rem', fontWeight: '900' }}>Caption Rater</h1>
+          <p style={{ color: '#475569', marginBottom: '32px', fontSize: '1.1rem' }}>Sign in to rate and generate AI memes.</p>
           <form action={async () => {
             'use server'
             const supabase = await createClient()
@@ -22,8 +23,8 @@ export default async function Home() {
             })
             if (data.url) redirect(data.url)
           }}>
-            <button style={{ padding: '12px 24px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-              Sign in with Google
+            <button style={{ width: '100%', padding: '16px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: '700', fontSize: '1.1rem' }}>
+              Continue with Google
             </button>
           </form>
         </div>
@@ -33,17 +34,10 @@ export default async function Home() {
 
   const { data: { session } } = await supabase.auth.getSession()
 
-  // UPDATE: Fetching the image URL by joining the 'images' table
+  // Requirement: Fetch image URL from related table
   const { data: captions } = await supabase
     .from('captions')
-    .select(`
-      id,
-      content,
-      created_datetime_utc,
-      image_id,
-      images (url),
-      caption_votes (vote_value)
-    `)
+    .select(`id, content, created_datetime_utc, images (url), caption_votes (vote_value)`)
     .order('created_datetime_utc', { ascending: false })
 
   async function handleVote(formData: FormData) {
@@ -56,6 +50,7 @@ export default async function Home() {
     const voteValue = parseInt(formData.get('voteValue') as string)
     const now = new Date().toISOString()
 
+    // Requirement: Correct voting mutation
     await supabase.from('caption_votes').upsert({
       caption_id: captionId,
       profile_id: currentUser.id,
@@ -68,51 +63,57 @@ export default async function Home() {
   }
 
   return (
-    <main style={{ padding: '40px 20px', maxWidth: '650px', margin: '0 auto', fontFamily: '"Inter", sans-serif', color: '#1e293b', backgroundColor: '#fdfdfd' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-        <div style={{ fontSize: '0.9rem', color: '#64748b' }}>Logged in as: <b style={{ color: '#334155' }}>{user.email}</b></div>
+    <main style={{ padding: '0 20px 80px', maxWidth: '600px', margin: '0 auto', fontFamily: 'Inter, sans-serif', color: '#0f172a', backgroundColor: '#fdfdfd' }}>
+      <header style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(10px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 0', marginBottom: '40px', borderBottom: '2px solid #f1f5f9' }}>
+        <div style={{ fontSize: '0.9rem', color: '#475569' }}>User: <b style={{ color: '#0f172a' }}>{user.email}</b></div>
         <form action={async () => { 'use server'; const supabase = await createClient(); await supabase.auth.signOut(); redirect('/'); }}>
-          <button style={{ cursor: 'pointer', padding: '6px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontWeight: '500' }}>Sign Out</button>
+          <button style={{ cursor: 'pointer', padding: '8px 16px', borderRadius: '10px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '700', color: '#0f172a' }}>Sign Out</button>
         </form>
       </header>
 
+      {/* Requirement: Step 1-4 Pipeline Auth */}
       <UploadForm sessionToken={session?.access_token || ''} />
 
-      <h2 style={{ margin: '50px 0 10px', fontSize: '1.4rem', fontWeight: '800', color: '#1e293b' }}>Caption Feed</h2>
-      <div style={{ height: '3px', width: '100%', backgroundColor: '#2563eb', marginBottom: '25px', borderRadius: '2px' }}></div>
+      <div style={{ margin: '60px 0 32px' }}>
+        <h2 style={{ fontSize: '1.8rem', fontWeight: '900', color: '#0f172a' }}>Meme Feed</h2>
+        <div style={{ height: '5px', width: '50px', backgroundColor: '#2563eb', marginTop: '10px', borderRadius: '10px' }}></div>
+      </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
         {captions?.map((caption: any) => {
           const score = caption.caption_votes?.reduce((acc: number, v: any) => acc + v.vote_value, 0) || 0;
           const imageUrl = caption.images?.url;
 
           return (
-            <div key={caption.id} style={{ border: '1px solid #e2e8f0', borderRadius: '16px', backgroundColor: '#fff', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)', overflow: 'hidden' }}>
-              {/* FEATURE: Displaying the image from the pipeline */}
+            <div key={caption.id} style={{ border: '1px solid #e2e8f0', borderRadius: '28px', backgroundColor: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+              {/* UI FIX: Exact Same Size Images with subtle border */}
               {imageUrl && (
-                <div style={{ width: '100%', height: '300px', backgroundColor: '#f1f5f9', overflow: 'hidden' }}>
+                <div style={{ width: '100%', height: '380px', backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
                   <img
                     src={imageUrl}
-                    alt="Uploaded content"
+                    alt="Meme"
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 </div>
               )}
 
-              <div style={{ padding: '24px' }}>
-                <div style={{ fontSize: '1.15rem', fontWeight: '500', marginBottom: '20px', lineHeight: '1.6' }}>{caption.content}</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '15px' }}>
-                  <div style={{ fontSize: '1rem', fontWeight: '600', color: '#475569' }}>
-                    Score: <span style={{ color: score > 0 ? '#10b981' : score < 0 ? '#ef4444' : '#64748b' }}>{score}</span>
+              <div style={{ padding: '32px' }}>
+                <p style={{ fontSize: '1.35rem', fontWeight: '700', marginBottom: '28px', color: '#0f172a', lineHeight: '1.4' }}>
+                  {caption.content}
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '24px', borderTop: '2px solid #f8fafc' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1rem', color: '#64748b', fontWeight: '500' }}>Score: </span>
+                    <b style={{ fontSize: '1.25rem', color: score > 0 ? '#10b981' : score < 0 ? '#ef4444' : '#0f172a' }}>{score}</b>
                   </div>
                   <div style={{ display: 'flex', gap: '12px' }}>
                     <form action={handleVote}>
                       <input type="hidden" name="captionId" value={caption.id} /><input type="hidden" name="voteValue" value="1" />
-                      <button type="submit" style={{ cursor: 'pointer', padding: '10px 18px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>👍</button>
+                      <button type="submit" style={{ cursor: 'pointer', width: '48px', height: '48px', borderRadius: '14px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '1.3rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>👍</button>
                     </form>
                     <form action={handleVote}>
                       <input type="hidden" name="captionId" value={caption.id} /><input type="hidden" name="voteValue" value="-1" />
-                      <button type="submit" style={{ cursor: 'pointer', padding: '10px 18px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>👎</button>
+                      <button type="submit" style={{ cursor: 'pointer', width: '48px', height: '48px', borderRadius: '14px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '1.3rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>👎</button>
                     </form>
                   </div>
                 </div>
