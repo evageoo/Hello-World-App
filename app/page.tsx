@@ -5,14 +5,12 @@ import UploadForm from '../components/UploadForm'
 
 export default async function Home() {
   const supabase = await createClient()
-
-  // Requirement: Use getUser for secure server-side auth
   const { data: { user }, error: authError } = await supabase.auth.getUser()
 
   if (!user || authError) {
     return (
       <main style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#f1f5f9' }}>
-        <div style={{ backgroundColor: '#fff', padding: '48px', borderRadius: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', textAlign: 'center', border: '1px solid #e2e8f0', maxWidth: '400px' }}>
+        <div style={{ backgroundColor: '#fff', padding: '48px', borderRadius: '24px', textAlign: 'center', border: '1px solid #e2e8f0', maxWidth: '400px' }}>
           <h1 style={{ color: '#0f172a', marginBottom: '12px', fontSize: '2.2rem', fontWeight: '900' }}>Caption Rater</h1>
           <form action={async () => {
             'use server'
@@ -34,11 +32,9 @@ export default async function Home() {
 
   const { data: { session } } = await supabase.auth.getSession()
 
-  // PERFORMANCE: Added .limit(25) to speed up loading
-  // REQUIREMENT: Join images table to show resulting captions
   const { data: captions } = await supabase
     .from('captions')
-    .select(`id, content, images (url), caption_votes (vote_value)`)
+    .select(`id, content, images (url), caption_votes (vote_value, profile_id)`)
     .order('created_datetime_utc', { ascending: false })
     .limit(25)
 
@@ -52,7 +48,6 @@ export default async function Home() {
     const voteValue = parseInt(formData.get('voteValue') as string)
     const now = new Date().toISOString()
 
-    // REQUIREMENT: Correct voting mutation with datetime fields
     await supabase.from('caption_votes').upsert({
       caption_id: captionId,
       profile_id: currentUser.id,
@@ -65,57 +60,62 @@ export default async function Home() {
   }
 
   return (
-    <main style={{ padding: '0 20px 100px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', color: '#0f172a', backgroundColor: '#fff' }}>
-      <header style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 0', marginBottom: '40px', borderBottom: '2px solid #f1f5f9' }}>
-        <div style={{ fontSize: '0.95rem', color: '#0f172a' }}>User: <b style={{ fontWeight: '800' }}>{user.email}</b></div>
+    <main style={{ padding: '0 20px 100px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', color: '#0f172a' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 0', borderBottom: '2px solid #f1f5f9' }}>
+        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Logged in as: <b>{user.email}</b></div>
         <form action={async () => { 'use server'; const supabase = await createClient(); await supabase.auth.signOut(); redirect('/'); }}>
-          <button style={{ cursor: 'pointer', padding: '10px 20px', borderRadius: '12px', border: '2px solid #0f172a', background: 'transparent', fontWeight: '800' }}>Sign Out</button>
+          <button style={{ cursor: 'pointer', padding: '8px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', background: 'white', fontWeight: '600', fontSize: '12px' }}>Sign Out</button>
         </form>
       </header>
 
-      {/* REQUIREMENT: Pass JWT token for 4-step pipeline */}
       <UploadForm sessionToken={session?.access_token || ''} />
 
       <div style={{ margin: '60px 0 32px' }}>
-        <h2 style={{ fontSize: '2rem', fontWeight: '900' }}>Meme Feed</h2>
-        <div style={{ height: '6px', width: '60px', backgroundColor: '#2563eb', marginTop: '12px', borderRadius: '10px' }}></div>
+        <h2 style={{ fontSize: '2.5rem', fontWeight: '900', letterSpacing: '-0.05em' }}>MEME_FEED</h2>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
         {captions?.map((caption: any) => {
-          const score = caption.caption_votes?.reduce((acc: number, v: any) => acc + v.vote_value, 0) || 0;
+          const votes = caption.caption_votes || [];
+          const score = votes.reduce((acc: number, v: any) => acc + v.vote_value, 0) || 0;
+          const userVote = votes.find((v: any) => v.profile_id === user.id)?.vote_value;
           const imageUrl = caption.images?.url;
 
           return (
-            <div key={caption.id} style={{ border: '2px solid #f1f5f9', borderRadius: '32px', backgroundColor: '#fff', boxShadow: '0 15px 30px -10px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+            <div key={caption.id} style={{ border: '2px solid #f1f5f9', borderRadius: '32px', overflow: 'hidden', backgroundColor: '#fff' }}>
               {imageUrl && (
                 <div style={{ width: '100%', height: '400px', backgroundColor: '#f8fafc' }}>
-                  <img
-                    src={imageUrl}
-                    alt="Meme"
-                    loading="lazy"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
+                  <img src={imageUrl} alt="Meme" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                 </div>
               )}
 
               <div style={{ padding: '32px' }}>
-                <p style={{ fontSize: '1.5rem', fontWeight: '800', marginBottom: '32px', color: '#0f172a', lineHeight: '1.3' }}>
-                  {caption.content}
-                </p>
+                <p style={{ fontSize: '1.5rem', fontWeight: '800', marginBottom: '32px' }}>{caption.content}</p>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '24px', borderTop: '2px solid #f1f5f9' }}>
                   <div>
-                    <span style={{ fontSize: '1.1rem', color: '#475569', fontWeight: '600' }}>Score: </span>
-                    <b style={{ fontSize: '1.4rem', color: score > 0 ? '#10b981' : (score < 0 ? '#ef4444' : '#0f172a') }}>{score}</b>
+                    <span style={{ fontWeight: '600', color: '#64748b', fontSize: '0.9rem', textTransform: 'uppercase' }}>Net Score</span>
+                    <div style={{ fontSize: '1.8rem', fontWeight: '900', color: score > 0 ? '#10b981' : (score < 0 ? '#ef4444' : '#0f172a') }}>{score}</div>
                   </div>
                   <div style={{ display: 'flex', gap: '12px' }}>
                     <form action={handleVote}>
                       <input type="hidden" name="captionId" value={caption.id} /><input type="hidden" name="voteValue" value="1" />
-                      <button type="submit" style={{ cursor: 'pointer', width: '56px', height: '56px', borderRadius: '18px', border: '2px solid #e2e8f0', backgroundColor: '#fff', fontSize: '1.5rem' }}>👍</button>
+                      <button type="submit" style={{
+                        cursor: 'pointer', width: '64px', height: '64px', borderRadius: '20px',
+                        border: '3px solid',
+                        borderColor: userVote === 1 ? '#10b981' : '#f1f5f9',
+                        backgroundColor: userVote === 1 ? '#ecfdf5' : '#fff',
+                        fontSize: '1.5rem', transition: 'all 0.2s'
+                      }}>👍</button>
                     </form>
                     <form action={handleVote}>
                       <input type="hidden" name="captionId" value={caption.id} /><input type="hidden" name="voteValue" value="-1" />
-                      <button type="submit" style={{ cursor: 'pointer', width: '56px', height: '56px', borderRadius: '18px', border: '2px solid #e2e8f0', backgroundColor: '#fff', fontSize: '1.5rem' }}>👎</button>
+                      <button type="submit" style={{
+                        cursor: 'pointer', width: '64px', height: '64px', borderRadius: '20px',
+                        border: '3px solid',
+                        borderColor: userVote === -1 ? '#ef4444' : '#f1f5f9',
+                        backgroundColor: userVote === -1 ? '#fef2f2' : '#fff',
+                        fontSize: '1.5rem', transition: 'all 0.2s'
+                      }}>👎</button>
                     </form>
                   </div>
                 </div>
