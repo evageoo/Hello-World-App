@@ -1,29 +1,35 @@
 import { createClient } from '@/utils/supabaseServer'
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
-import UploadForm from '../components/UploadForm'
 
 export default async function Home() {
   const supabase = await createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
 
+  // --- 1. THE AUTH WALL (Fixed for Vercel & High Contrast) ---
   if (!user || authError) {
     return (
-      <main style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#f1f5f9' }}>
-        <div style={{ backgroundColor: '#fff', padding: '48px', borderRadius: '42px', textAlign: 'center', border: '1px solid #e2e8f0', shadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', maxWidth: '400px' }}>
-          <h1 style={{ color: '#0f172a', marginBottom: '12px', fontSize: '2.2rem', fontWeight: '900', letterSpacing: '-0.05em' }}>CAPTION_RATER</h1>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '32px', fontWeight: '500' }}>Please authenticate to access the feed.</p>
+      <main style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#f8fafc', fontFamily: 'sans-serif' }}>
+        <div style={{ backgroundColor: '#fff', padding: '60px', borderRadius: '48px', textAlign: 'center', border: '3px solid #000', boxShadow: '20px 20px 0px #000', maxWidth: '420px' }}>
+          <h1 style={{ color: '#000', marginBottom: '8px', fontSize: '2.5rem', fontWeight: '900', letterSpacing: '-0.07em', fontStyle: 'italic', textTransform: 'uppercase' }}>Auth Required</h1>
+          <p style={{ color: '#000', fontSize: '0.75rem', marginBottom: '40px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.2em', opacity: 0.5 }}>Terminal Connection: Restricted</p>
+
           <form action={async () => {
             'use server'
             const supabase = await createClient()
-            const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : 'http://localhost:3000'
+            const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL
+              ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
+              : 'http://localhost:3000'
+
             const { data } = await supabase.auth.signInWithOAuth({
-              provider: 'google', options: { redirectTo: `${baseUrl}/auth/callback` },
+              provider: 'google',
+              options: {
+                redirectTo: `${baseUrl}/auth/callback`
+              },
             })
             if (data.url) redirect(data.url)
           }}>
-            <button style={{ width: '100%', padding: '16px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '16px', cursor: 'pointer', fontWeight: '800', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Initialize Google Auth
+            <button style={{ width: '100%', padding: '20px', backgroundColor: '#2563eb', color: 'white', border: '3px solid #000', borderRadius: '20px', cursor: 'pointer', fontWeight: '900', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em', boxShadow: '0 8px 0 #0044cc' }}>
+              Initialize Admin Session
             </button>
           </form>
         </div>
@@ -31,106 +37,95 @@ export default async function Home() {
     )
   }
 
-  const { data: { session } } = await supabase.auth.getSession()
+  // --- 2. THE SUPERADMIN CHECK (Security Requirement) ---
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('is_superadmin')
+    .eq('id', user.id)
+    .single()
 
-  const { data: captions } = await supabase
-    .from('captions')
-    .select(`id, content, images (url), caption_votes (vote_value, profile_id)`)
-    .order('created_datetime_utc', { ascending: false })
-    .limit(25)
+  if (!profile?.is_superadmin) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#fff', fontFamily: 'sans-serif' }}>
+        <div style={{ textAlign: 'center', border: '3px solid #ef4444', padding: '50px', borderRadius: '40px', boxShadow: '15px 15px 0 #ef4444' }}>
+          <h1 style={{ color: '#ef4444', fontWeight: '900', fontSize: '2rem', textTransform: 'uppercase', italic: 'true' }}>Access Denied</h1>
+          <p style={{ fontWeight: '700', marginTop: '10px' }}>User: {user.email}</p>
+          <p style={{ fontSize: '12px', color: '#64748b', marginTop: '20px' }}>You do not have the required SUPERADMIN permissions.</p>
+        </div>
+      </div>
+    )
+  }
 
-  // --- UPDATED HANDLE VOTE FOR ASSIGNMENT 12 AUDIT ---
-  async function handleVote(formData: FormData) {
-    'use server'
-    const supabase = await createClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
-    if (!currentUser) return
+  // --- 3. THE ADMIN DATA (Audit & Stats) ---
+  const { data: scoreData } = await supabase.from('caption_scores').select('total_votes')
+  const { data: topPerformers } = await supabase
+    .from('caption_scores')
+    .select('display_text, total_votes')
+    .order('total_votes', { ascending: false })
+    .limit(3)
 
-    const captionId = formData.get('captionId')
-    const voteValue = parseInt(formData.get('voteValue') as string)
-    const now = new Date().toISOString()
+  const totalRows = scoreData?.length || 0
+  const avgVotes = totalRows > 0 ? (scoreData!.reduce((acc, curr) => acc + (curr.total_votes || 0), 0) / totalRows).toFixed(2) : 0
 
-    await supabase.from('caption_votes').upsert({
-      caption_id: captionId,
-      profile_id: currentUser.id,
-      vote_value: voteValue,
-      // MICHAEL FIELD AUDIT FIELDS (Assignment 12 requirement)
-      created_by_user_id: currentUser.id,
-      modified_by_user_id: currentUser.id,
-      created_datetime_utc: now,
-      modified_datetime_utc: now
-    }, { onConflict: 'caption_id, profile_id' })
+  const fetchAudit = async (table: string) => {
+    const { data, count } = await supabase.from(table).select('created_by_user_id', { count: 'exact' }).limit(5)
+    return { rows: data || [], total: count || 0 }
+  }
 
-    revalidatePath('/')
+  const audits = {
+    Profiles: await fetchAudit('profiles'),
+    Flavors: await fetchAudit('humor_flavors'),
+    Steps: await fetchAudit('humor_flavor_steps'),
+    Captions: await fetchAudit('captions')
   }
 
   return (
-    <main style={{ padding: '0 20px 100px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif', color: '#0f172a' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 0', borderBottom: '2px solid #f1f5f9' }}>
-        <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: '500' }}>NODE_ACTIVE: <b style={{ color: '#2563eb' }}>{user.email}</b></div>
-        <form action={async () => { 'use server'; const supabase = await createClient(); await supabase.auth.signOut(); redirect('/'); }}>
-          <button style={{ cursor: 'pointer', padding: '8px 16px', borderRadius: '12px', border: '1px solid #e2e8f0', background: 'white', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sign Out</button>
-        </form>
+    <main style={{ padding: '40px', backgroundColor: '#f8fafc', minHeight: '100vh', fontFamily: 'sans-serif', color: '#000' }}>
+      <header style={{ maxWidth: '1100px', margin: '0 auto 60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1 style={{ fontSize: '4.5rem', fontWeight: '900', margin: 0, letterSpacing: '-0.08em', fontStyle: 'italic', textTransform: 'uppercase', lineHeight: '0.9' }}>Admin Domain</h1>
+          <p style={{ color: '#2563eb', fontWeight: '900', fontSize: '11px', letterSpacing: '0.4em', textTransform: 'uppercase', marginTop: '15px' }}>Michael_Audit_System_v12 // ONLINE</p>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <p style={{ margin: 0, color: '#000', fontSize: '10px', fontWeight: '900', opacity: 0.3, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Authenticated_Node</p>
+          <p style={{ margin: 0, fontWeight: '900', fontSize: '16px', color: '#2563eb' }}>{user.email}</p>
+        </div>
       </header>
 
-      <UploadForm sessionToken={session?.access_token || ''} />
+      <div style={{ maxWidth: '1100px', margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '30px' }}>
+        <div style={{ backgroundColor: '#2563eb', color: 'white', padding: '50px', borderRadius: '40px', border: '4px solid #000', boxShadow: '15px 15px 0 #000' }}>
+          <p style={{ fontSize: '11px', fontWeight: '900', letterSpacing: '0.2em', opacity: 0.8 }}>AVG ENGAGEMENT</p>
+          <h2 style={{ fontSize: '5rem', margin: '15px 0', fontWeight: '900', letterSpacing: '-0.05em' }}>{avgVotes}</h2>
+          <p style={{ fontSize: '11px', fontWeight: '700' }}>VOTES / CAPTION_ID</p>
+        </div>
 
-      <div style={{ margin: '60px 0 32px' }}>
-        <h2 style={{ fontSize: '3rem', fontWeight: '900', letterSpacing: '-0.07em', fontStyle: 'italic' }}>MEME_FEED</h2>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
-        {captions?.map((caption: any) => {
-          const votes = caption.caption_votes || [];
-          const score = votes.reduce((acc: number, v: any) => acc + v.vote_value, 0) || 0;
-          const userVote = votes.find((v: any) => v.profile_id === user.id)?.vote_value;
-          const imageUrl = caption.images?.url;
-
-          return (
-            <div key={caption.id} style={{ border: '1px solid #e2e8f0', borderRadius: '42px', overflow: 'hidden', backgroundColor: '#fff', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}>
-              {imageUrl && (
-                <div style={{ width: '100%', height: '400px', backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                  <img src={imageUrl} alt="Meme" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                </div>
-              )}
-
-              <div style={{ padding: '40px' }}>
-                <p style={{ fontSize: '1.4rem', fontWeight: '800', marginBottom: '32px', lineHeight: '1.2' }}>{caption.content}</p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '24px', borderTop: '1px solid #f1f5f9' }}>
-                  <div>
-                    <span style={{ fontWeight: '800', color: '#cbd5e1', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Score</span>
-                    <div style={{ fontSize: '1.8rem', fontWeight: '900', color: score > 0 ? '#10b981' : (score < 0 ? '#ef4444' : '#0f172a') }}>{score}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '16px' }}>
-                    <form action={handleVote}>
-                      <input type="hidden" name="captionId" value={caption.id} /><input type="hidden" name="voteValue" value="1" />
-                      <button type="submit" style={{
-                        cursor: 'pointer', width: '60px', height: '60px', borderRadius: '20px',
-                        border: '2px solid',
-                        borderColor: userVote === 1 ? '#10b981' : '#f1f5f9',
-                        backgroundColor: userVote === 1 ? '#ecfdf5' : '#fff',
-                        fontSize: '1.4rem', transition: 'all 0.2s',
-                        boxShadow: userVote === 1 ? '0 10px 15px -3px rgba(16, 185, 129, 0.2)' : 'none'
-                      }}>👍</button>
-                    </form>
-                    <form action={handleVote}>
-                      <input type="hidden" name="captionId" value={caption.id} /><input type="hidden" name="voteValue" value="-1" />
-                      <button type="submit" style={{
-                        cursor: 'pointer', width: '60px', height: '60px', borderRadius: '20px',
-                        border: '2px solid',
-                        borderColor: userVote === -1 ? '#ef4444' : '#f1f5f9',
-                        backgroundColor: userVote === -1 ? '#fef2f2' : '#fff',
-                        fontSize: '1.4rem', transition: 'all 0.2s',
-                        boxShadow: userVote === -1 ? '0 10px 15px -3px rgba(239, 68, 68, 0.2)' : 'none'
-                      }}>👎</button>
-                    </form>
-                  </div>
-                </div>
-              </div>
+        <div style={{ backgroundColor: 'white', padding: '50px', borderRadius: '40px', border: '4px solid #000', boxShadow: '15px 15px 0 #000' }}>
+          <p style={{ fontSize: '11px', fontWeight: '900', letterSpacing: '0.2em', color: '#64748b', marginBottom: '25px' }}>TOP PERFORMERS</p>
+          {topPerformers?.map((p, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '2px solid #f1f5f9' }}>
+              <span style={{ fontWeight: '900', fontSize: '16px', fontStyle: 'italic' }}>"{p.display_text}"</span>
+              <span style={{ color: '#2563eb', fontWeight: '900', fontSize: '18px' }}>{p.total_votes}pts</span>
             </div>
-          )
-        })}
+          ))}
+        </div>
       </div>
+
+      <div style={{ maxWidth: '1100px', margin: '40px auto', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '25px' }}>
+        {Object.entries(audits).map(([name, data]) => (
+          <div key={name} style={{ backgroundColor: 'white', padding: '25px', borderRadius: '30px', border: '3px solid #000' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+              <h4 style={{ margin: 0, fontSize: '10px', fontWeight: '900', color: '#94a3b8' }}>{name.toUpperCase()}</h4>
+              <span style={{ fontSize: '10px', fontWeight: '900', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '5px' }}>{data.total}</span>
+            </div>
+            {data.rows.map((r: any, i) => (
+              <div key={i} style={{ fontSize: '9px', fontWeight: '700', fontFamily: 'monospace', backgroundColor: '#f8fafc', padding: '8px', marginBottom: '6px', borderRadius: '10px', border: '1px solid #e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                AUDIT: {r.created_by_user_id?.substring(0, 12)}...
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{ height: '60px' }} />
     </main>
   )
 }
